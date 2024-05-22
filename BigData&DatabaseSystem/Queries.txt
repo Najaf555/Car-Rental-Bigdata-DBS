@@ -1,0 +1,153 @@
+ 
+
+
+a)
+USE ElectricCarRentalDB;
+SELECT ec.CarID, ec.Manufacturer, ec.ModelName FROM ElectricCar ec
+LEFT JOIN (
+SELECT CarID, MAX(StartTime) AS LastChargingTime
+FROM ChargingSession
+GROUP BY CarID
+) AS cs ON ec.CarID = cs.CarID
+WHERE cs.LastChargingTime IS NULL
+OR cs.LastChargingTime< DATE_SUB(NOW(), INTERVAL 72 HOUR)
+ORDER BY ec.CarID;
+
+
+
+b)
+USE ElectricCarRentalDB;
+
+SELECT
+    c.CustomerID,
+    CONCAT(c.Name, ', ', c.Address) AS CustomerDetails,
+    c.DateOfBirth,
+    c.PassportNumber,
+    COUNT(ra.AgreementID) AS RentalCount,
+    GROUP_CONCAT(DISTINCT CONCAT('Rental ID: ', ra.AgreementID, ', Car ID: ', ra.CarID, ', Issue Date: ', ra.IssueDateTime, ', Due Date: ', ra.DueDateTime) SEPARATOR '; ') AS RentalDetails
+FROM
+    Customer c
+LEFT JOIN
+    RentalMembershipCard rmc ON c.CustomerID = rmc.CustomerID
+LEFT JOIN
+    RentalAgreement ra ON rmc.CardID = ra.CardID AND ra.IssueDateTime >= DATE_SUB('2023-01-21', INTERVAL 6 MONTH)
+GROUP BY
+    c.CustomerID, c.Name, c.Address, c.DateOfBirth, c.PassportNumber
+HAVING
+    RentalCount < 3
+ORDER BY
+    c.CustomerID;
+
+
+
+
+c)
+
+SELECT
+    cs.SessionID,
+    ec.Manufacturer,
+    ec.ModelName,
+    DATE(cs.StartTime) AS SessionDate,
+    TIME(cs.StartTime) AS StartSessionTime,
+    TIME(cs.EndTime) AS EndSessionTime,
+    cs.StartBatteryLevel,
+    cs.EndBatteryLevel
+FROM ChargingSession cs
+JOIN ElectricCar ec ON cs.CarID = ec.CarID
+WHERE DATE(cs.StartTime) BETWEEN '2024-04-05' AND '2024-04-12'
+ORDER BY cs.StartTime;
+
+
+
+
+
+
+d)
+
+ USE ElectricCarRentalDB;
+DELIMITER //
+
+CREATE PROCEDURE GetRepairDetailsReport()
+BEGIN
+ 
+    CREATE TEMPORARY TABLE IF NOT EXISTS DetailedRepairReport (
+        CarID INT,
+        Manufacturer VARCHAR(255),
+        ModelName VARCHAR(255),
+        ReportID INT,
+        EngineerName VARCHAR(255),
+        ReportDate DATE,
+        MaintenanceDetails VARCHAR(1000),
+        RepairCost DECIMAL(10, 2),
+        TotalRepairCostToDate DECIMAL(10, 2)
+    );
+
+ 
+    INSERT INTO DetailedRepairReport (CarID, Manufacturer, ModelName, ReportID, EngineerName, ReportDate, MaintenanceDetails, RepairCost, TotalRepairCostToDate)
+    SELECT
+        ec.CarID,
+        ec.Manufacturer,
+        ec.ModelName,
+        sr.ReportID,
+        sr.EngineerName,
+        sr.ReportDate,
+        sr.MaintenanceDetails,
+        sr.RepairCost,
+        SUM(sr.RepairCost) OVER (PARTITION BY ec.CarID) AS TotalRepairCostToDate
+    FROM
+        ElectricCar ec
+    JOIN
+        ServiceReport sr ON ec.CarID = sr.CarID
+    ORDER BY
+        ec.CarID, sr.ReportDate;
+
+ 
+    SELECT * FROM DetailedRepairReport;
+
+ 
+    DROP TEMPORARY TABLE IF EXISTS DetailedRepairReport;
+END //
+
+DELIMITER ;
+CALL GetRepairDetailsReport();
+
+
+
+e)
+
+USE ElectricCarRentalDB;
+
+DELIMITER //
+
+CREATE PROCEDURE GenerateMonthlyRentalStatement(IN report_month DATE)
+BEGIN
+    SELECT
+        c.CustomerID,
+        c.Name AS CustomerName,
+        ra.AgreementID AS RentalID,
+        ec.ModelName AS CarModel,
+        ra.IssueDateTime AS RentalDate,
+        ra.PaymentAmount AS RentalAmount,
+        ra.PaymentAmount * 0.20 AS VAT,
+        ra.PaymentAmount * 1.20 AS TotalAmount
+    FROM
+        RentalAgreement ra
+    JOIN
+        RentalMembershipCard rmc ON ra.CardID = rmc.CardID
+    JOIN
+        Customer c ON rmc.CustomerID = c.CustomerID
+    JOIN
+        ElectricCar ec ON ra.CarID = ec.CarID
+    WHERE
+        ra.IssueDateTime >= DATE_FORMAT(report_month, '%Y-%m-01')
+        AND ra.IssueDateTime < DATE_FORMAT(DATE_ADD(report_month, INTERVAL 1 MONTH), '%Y-%m-01')
+    ORDER BY
+        c.CustomerID, ra.IssueDateTime;
+END //
+
+DELIMITER ;
+
+
+
+CALL GenerateMonthlyRentalStatement('2023-01-01');
+
